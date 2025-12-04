@@ -4,9 +4,9 @@ from craft_code.config.loader import load_config, save_config
 
 app = typer.Typer(
     name="craft-code",
-    help="Craft Code. A local LLM-powered assistant that can explore, " \
-            "analyze, and modify your codebase through structured tool calls. " \
-            "Chat with your codebase — locally and privately.",
+    help="Craft Code. A local LLM-powered assistant that can explore, "
+    "analyze, and modify your codebase through structured tool calls. "
+    "Chat with your codebase — locally and privately.",
     invoke_without_command=True,
 )
 
@@ -24,14 +24,16 @@ def version_callback(value: bool):
 def main_callback(
     version: bool = typer.Option(
         None,
-        "--version", "-v",
+        "--version",
+        "-v",
         help="Show craft-code version and exit.",
         callback=version_callback,
-        is_eager=True
-    )
+        is_eager=True,
+    ),
 ):
     """Craft Code CLI entry point."""
     from craft_code.ui.app import CraftCodeApp
+
     app_instance = CraftCodeApp(workspace=".")
     app_instance.run()
 
@@ -43,8 +45,7 @@ def configure():
 
     current = load_config()
     provider = typer.prompt(
-        "Select provider [lm_studio / ollama / openai]",
-        default="lm_studio"
+        "Select provider [lm_studio / ollama / openai]", default="lm_studio"
     )
 
     if provider not in current["models"]:
@@ -57,7 +58,9 @@ def configure():
 
     api_key = model_cfg.get("api_key", "")
     if provider == "openai":
-        api_key = typer.prompt("OpenAI API key (starts with sk-...)", default=api_key, hide_input=True)
+        api_key = typer.prompt(
+            "OpenAI API key (starts with sk-...)", default=api_key, hide_input=True
+        )
     elif provider in {"lm_studio", "ollama"}:
         typer.echo("Local mode detected — API key not required.")
         api_key = api_key or provider

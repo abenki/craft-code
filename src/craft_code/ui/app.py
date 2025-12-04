@@ -110,7 +110,7 @@ class CraftCodeApp(App):
 
     def __init__(self, workspace: str = "."):
         """Initialize Craft Code UI.
-        
+
         Args:
             workspace: Working directory path
         """
@@ -127,57 +127,56 @@ class CraftCodeApp(App):
             yield LogPanel(id="log-panel")
             with Container(id="input-container"):
                 yield Input(
-                    placeholder="Type your message or /exit to quit...",
-                    id="chat-input"
+                    placeholder="Type your message or /exit to quit...", id="chat-input"
                 )
-        
+
         yield StatusLine(id="statusline")
 
     def on_mount(self) -> None:
         """Initialize the application on mount."""
         set_base_dir(self.workspace)
-        
+
         cfg = get_active_model_config()
         self.client = OpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"])
-        
+
         statusline = self.query_one("#statusline", StatusLine)
         statusline.update_config(cfg, BASE_DIR)
-        
+
         chat = self.query_one("#chat-container", ChatHistory)
         chat.add_system_message("Craft Code started. Type /help for commands.")
-        
+
         self.query_one("#chat-input", Input).focus()
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle user input submission.
-        
+
         Args:
             event: Input submission event
         """
         if self.is_processing:
             return
-            
+
         user_input = event.value.strip()
         if not user_input:
             return
-        
+
         event.input.value = ""
-        
+
         # Handle commands
         if user_input.startswith("/"):
             await self.handle_command(user_input)
             return
-        
+
         # Process message
         chat = self.query_one("#chat-container", ChatHistory)
         chat.add_user_message(user_input)
-        
+
         self.messages.append({"role": "user", "content": user_input})
-        
+
         self.is_processing = True
         statusline = self.query_one("#statusline", StatusLine)
         statusline.set_processing(True)
-        
+
         try:
             # Run agent in background
             await self.run_agent_async()
@@ -189,27 +188,29 @@ class CraftCodeApp(App):
         """Run the agent loop asynchronously."""
         chat = self.query_one("#chat-container", ChatHistory)
         log_panel = self.query_one("#log-panel", LogPanel)
-        
+
         # Define callback to handle messages from agent
         def message_callback(msg: dict) -> None:
             self.call_from_thread(self.handle_agent_message, msg, chat, log_panel)
-        
+
         # Define worker function that captures the arguments
         def worker_func():
             return run_agent(
                 messages=self.messages,
                 client=self.client,
                 verbose=False,
-                callback=message_callback
+                callback=message_callback,
             )
-        
+
         # Run agent in worker thread
         worker = self.run_worker(worker_func, thread=True)
         self.messages = await worker.wait()
 
-    def handle_agent_message(self, message: dict, chat: ChatHistory, log_panel: LogPanel) -> None:
+    def handle_agent_message(
+        self, message: dict, chat: ChatHistory, log_panel: LogPanel
+    ) -> None:
         """Handle messages from the agent.
-        
+
         Args:
             message: Message dictionary
             chat: ChatHistory widget
@@ -219,25 +220,25 @@ class CraftCodeApp(App):
             content = message.get("content", "")
             if content:
                 chat.add_assistant_message(content)
-        
+
         elif message.get("role") == "tool":
             tool_name = message.get("tool_name", "unknown")
             content = message.get("content", "")
             log_panel.add_log(f"Tool {tool_name}: {content}")
-        
+
         # Log all messages to log panel
         log_panel.add_log(f"Message: {message}")
 
     async def handle_command(self, command: str) -> None:
         """Handle slash commands.
-        
+
         Args:
             command: Command string starting with /
         """
         chat = self.query_one("#chat-container", ChatHistory)
-        
+
         cmd = command.lower().strip()
-        
+
         if cmd == "/exit" or cmd == "/quit":
             self.exit()
         elif cmd == "/clear":

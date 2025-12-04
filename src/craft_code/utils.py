@@ -4,16 +4,17 @@ import os
 
 BASE_DIR = os.getcwd()
 
+
 def debug_log(title, data=None):
     """Pretty-print debugging information safely.
-    
+
     Args:
         title (str): Title for the log section.
         data (any, optional): Data to be logged. Defaults to None.
     """
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print(f"🧠 {title} - {datetime.now().strftime('%H:%M:%S')}")
-    print("="*80)
+    print("=" * 80)
     if data is not None:
         try:
             print(json.dumps(data, indent=2))
@@ -31,13 +32,13 @@ def debug_log(title, data=None):
 def safe_path(path: str) -> str:
     """
     Resolve a path and ensure it stays inside BASE_DIR.
-    
+
     Args:
         path (str): User-supplied path (absolute or relative)
-    
+
     Returns:
         str: Absolute safe path
-    
+
     Raises:
         ValueError: If the path escapes BASE_DIR
     """
@@ -52,10 +53,13 @@ def safe_path(path: str) -> str:
 
     return full_path
 
+
 def rel_path(path: str) -> str:
     """Return the path relative to BASE_DIR."""
     from .utils import BASE_DIR
+
     return os.path.relpath(path, BASE_DIR)
+
 
 def set_base_dir(path: str):
     """Set the base working directory for Craft Code."""

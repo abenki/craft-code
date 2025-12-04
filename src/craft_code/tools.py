@@ -41,7 +41,10 @@ tools = [
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Path to the file"},
-                    "pattern": {"type": "string", "description": "Regex or keyword to search for"},
+                    "pattern": {
+                        "type": "string",
+                        "description": "Regex or keyword to search for",
+                    },
                 },
                 "required": ["path", "pattern"],
             },
@@ -56,7 +59,10 @@ tools = [
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Path to the file"},
-                    "content": {"type": "string", "description": "Text content to write"},
+                    "content": {
+                        "type": "string",
+                        "description": "Text content to write",
+                    },
                 },
                 "required": ["path", "content"],
             },
@@ -64,9 +70,10 @@ tools = [
     },
 ]
 
+
 def list_directory(path):
     """List files in the given directory.
-    
+
     Args:
         path (str): Path to the directory.
 
@@ -78,10 +85,11 @@ def list_directory(path):
         return os.listdir(safe_dir)
     except Exception as e:
         return {"error": str(e)}
-    
+
+
 def read_file(path):
     """Read the contents of a text file safely (max 20KB).
-    
+
     Args:
         path (str): Path to the file.
 
@@ -107,11 +115,11 @@ def read_file(path):
 
 def search_in_file(path, pattern):
     """Search for a regex or keyword inside a file and return matching lines.
-    
+
     Args:
         path (str): Path to the file.
         pattern (str): Regex pattern or keyword to search for.
-        
+
     Returns:
         dict: Matches found with line numbers.
     """

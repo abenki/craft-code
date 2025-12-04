@@ -26,15 +26,19 @@ DEFAULT_CONFIG = {
 
 CONFIG_PATH = Path(os.path.expanduser("~/.config/craft-code/config.toml"))
 
+
 def ensure_config_dir():
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
 
 def load_config():
     """Load Craft Code configuration, fallback to defaults if missing."""
     ensure_config_dir()
 
     if not CONFIG_PATH.exists():
-        print("No config file found, using default LM Studio settings. Please run 'craft-code --configure' to set up.")
+        print(
+            "No config file found, using default LM Studio settings. Please run 'craft-code --configure' to set up."
+        )
         return DEFAULT_CONFIG
 
     try:
@@ -49,6 +53,7 @@ def load_config():
     merged.update(data)
     return merged
 
+
 def get_active_model_config():
     """Return provider configuration for the active model."""
     cfg = load_config()
@@ -60,6 +65,7 @@ def get_active_model_config():
         "api_key": model_cfg.get("api_key"),
         "model": model_cfg.get("model"),
     }
+
 
 def save_config(config):
     """Save config to CONFIG_PATH."""

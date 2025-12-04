@@ -22,11 +22,13 @@ tools = [
     },
 ]
 
+
 def list_directory(path):
     try:
         return os.listdir(path)
     except Exception as e:
         return {"error": str(e)}
+
 
 def execute_tool(tool_name, args):
     """Route tool calls to the correct Python function."""
@@ -35,10 +37,11 @@ def execute_tool(tool_name, args):
     else:
         return {"error": f"Unknown tool '{tool_name}'"}
 
+
 def debug_log(title, data=None):
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print(f"🧠 {title} - {datetime.now().strftime('%H:%M:%S')}")
-    print("="*80)
+    print("=" * 80)
     if data is not None:
         try:
             print(json.dumps(data, indent=2))
@@ -52,11 +55,15 @@ def debug_log(title, data=None):
                 print(str(data))
     print()
 
+
 # -----------------------------------------------------------------------------
 # Start conversation
 # -----------------------------------------------------------------------------
 messages = [
-    {"role": "system", "content": "You are an assistant that can make changes to a codebase."},
+    {
+        "role": "system",
+        "content": "You are an assistant that can make changes to a codebase.",
+    },
     {"role": "user", "content": "List all files in the data folder."},
 ]
 
@@ -83,11 +90,13 @@ while True:
             tool_output = execute_tool(tool_name, args)
             debug_log(f"TOOL OUTPUT ({tool_name})", tool_output)
 
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": json.dumps(tool_output),
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(tool_output),
+                }
+            )
 
         # Continue looping — model may request another tool next turn
         continue
@@ -95,7 +104,7 @@ while True:
     # No tool calls? Then we’ve reached the final answer.
     if message.content:
         debug_log("FINAL ANSWER", message.content)
-        print("\n✅ FINAL ANSWER:\n" + "-"*80)
+        print("\n✅ FINAL ANSWER:\n" + "-" * 80)
         print(message.content)
         break
 
