@@ -5,14 +5,14 @@ from textual.binding import Binding
 
 from craft_code.config.loader import get_active_model_config
 from craft_code.utils import set_base_dir, BASE_DIR
-from craft_code.tui.widgets import ChatHistory, StatusLine, LogPanel
+from craft_code.ui.widgets import ChatHistory, StatusLine, LogPanel
 from craft_code.core import run_agent
 from craft_code.config.prompts import SYSTEM_PROMPT
 from openai import OpenAI
 
 
 class CraftCodeApp(App):
-    """Craft Code TUI Application."""
+    """Craft Code UI."""
 
     CSS = """
     /* Tokyo Night Theme Colors */
@@ -109,7 +109,7 @@ class CraftCodeApp(App):
     ]
 
     def __init__(self, workspace: str = "."):
-        """Initialize Craft Code TUI.
+        """Initialize Craft Code UI.
         
         Args:
             workspace: Working directory path
@@ -121,7 +121,7 @@ class CraftCodeApp(App):
         self.is_processing = False
 
     def compose(self) -> ComposeResult:
-        """Compose the TUI layout."""
+        """Compose the UI layout."""
         with Vertical(id="main-container"):
             yield ChatHistory(id="chat-container")
             yield LogPanel(id="log-panel")

@@ -1,18 +1,40 @@
-import sys
 import typer
 import tomllib
-from openai import OpenAI
-from craft_code.core import run_agent
-from craft_code.utils import set_base_dir
-from craft_code.config.prompts import SYSTEM_PROMPT
-from craft_code.config.loader import get_active_model_config, load_config, save_config
+from craft_code.config.loader import load_config, save_config
 
 app = typer.Typer(
     name="craft-code",
     help="Craft Code. A local LLM-powered assistant that can explore, " \
             "analyze, and modify your codebase through structured tool calls. " \
-            "Chat with your codebase — locally and privately."
+            "Chat with your codebase — locally and privately.",
+    invoke_without_command=True,
 )
+
+
+def version_callback(value: bool):
+    if value:
+        with open("pyproject.toml", "rb") as f:
+            pyproject = tomllib.load(f)
+            version = pyproject["project"]["version"]
+        typer.echo(version)
+        raise typer.Exit()
+
+
+@app.callback()
+def main_callback(
+    version: bool = typer.Option(
+        None,
+        "--version", "-v",
+        help="Show craft-code version and exit.",
+        callback=version_callback,
+        is_eager=True
+    )
+):
+    """Craft Code CLI entry point."""
+    from craft_code.ui.app import CraftCodeApp
+    app_instance = CraftCodeApp(workspace=".")
+    app_instance.run()
+
 
 @app.command("configure")
 def configure():
@@ -48,83 +70,10 @@ def configure():
     save_config(current)
     typer.echo("✅ Configuration updated successfully!")
 
-@app.command("ask")
-def ask(
-    question: str = typer.Argument(..., help="Question to ask Craft Code"),
-    logs: bool = typer.Option(False, "--logs", help="Enable debug logs"),
-    workspace: str = typer.Option(".", "--workspace", help="Set workspace directory"),
-):
-    """Ask a single question to Craft Code."""
-    cfg = get_active_model_config()
-    set_base_dir(workspace)
-    client = OpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"])
-
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": question},
-    ]
-
-    run_agent(messages=messages, client=client, verbose=logs)
-
-@app.command("chat")
-def chat(
-    logs: bool = typer.Option(False, "--logs", help="Enable debug logs"),
-    workspace: str = typer.Option(".", "--workspace", help="Set workspace directory"),
-):
-    """Start an interactive chat session with Craft Code."""
-    cfg = get_active_model_config()
-    set_base_dir(workspace)
-    client = OpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"])
-
-    typer.echo("⚒️ Craft Code session started. Type 'exit' or 'quit' to end.\n")
-
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-    while True:
-        try:
-            user_input = typer.prompt("🧑‍💻 You")
-        except (EOFError, KeyboardInterrupt):
-            typer.echo("\n👋 Session ended.")
-            break
-
-        if not user_input.strip():
-            # Skip empty lines for better UX
-            continue
-
-        if user_input.lower() in {"exit", "quit"}:
-            typer.echo("👋 Goodbye!")
-            break
-
-        messages.append({"role": "user", "content": user_input})
-        messages = run_agent(messages=messages, client=client, verbose=logs)
-        typer.echo("") # Add spacing between interactions
-
-@app.command("version")
-def version():
-    """Display Craft Code version."""
-    with open("pyproject.toml", "rb") as f:
-        pyproject = tomllib.load(f)
-        version = pyproject["project"]["version"]
-        typer.echo(f"Craft Code version: {version}")
-
-@app.command("tui")
-def tui(
-    ctx: typer.Context,
-    logs: bool = typer.Option(False, "--logs", help="Enable debug logs"),
-    workspace: str = typer.Option(".", "--workspace", help="Set workspace directory"),
-):
-    """Launch Craft Code TUI (default behavior)."""
-    if ctx.invoked_subcommand is None:
-        # Launch TUI
-        from craft_code.tui.app import CraftCodeApp
-        app_instance = CraftCodeApp(workspace=workspace)
-        app_instance.run()
 
 def main():
-    if len(sys.argv) == 1:
-        sys.argv.append("chat")
-
     app()
+
 
 if __name__ == "__main__":
     main()
