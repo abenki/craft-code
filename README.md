@@ -26,7 +26,7 @@ This installs the `craft-code` command globally in your system path.
 By default, Craft Code will connect to an LM Studio server running at http://localhost:1234/v1. To switch provider or customize settings, run:
 
 ```bash
-craft-code --configure
+craft-code configure
 ```
 
 This will create / edit your configuration file at: ```~/.config/craft-code/config.toml```
@@ -64,27 +64,18 @@ For LM Studio, launch the app, load the model you want to use and start the serv
 
 For Ollama, run `ollama serve` from your terminal.
 
-### Single query
-If you just want to ask a single question:
-```bash
-craft-code -q "List all files in the current directory."
-```
-
-### Interactive mode
-To start an interactive session with Craft Code:
+### Start Craft Code
+To start an interactive session:
 ```bash
 craft-code
 ```
      
-Then type your questions, and Craft Code will respond step-by-step.
+This launches the TUI where you can chat with your codebase. Type your questions and Craft Code will respond step-by-step using the available tools.
 
-### CLI Options
+### CLI Options and commands
 | Flag               | Description                                  |
 | ------------------ | -------------------------------------------- |
-| `-q, --question`   | Ask a single question (non-interactive mode) |
-| `--logs`           | Show detailed debug logs during execution    |
-| `--workspace PATH` | Specify working directory (default: `.`)     |
-| `--configure`      | Launch interactive configuration wizard      |
+| `configure`        | Launch interactive configuration wizard      |
 | `-v, --version`    | Show current Craft Code version              |
 
 
@@ -95,11 +86,30 @@ Then type your questions, and Craft Code will respond step-by-step.
 
 Example: if you run `craft-code` inside `/Users/bob/projects/my-app`, it cannot access files outside that folder.
 
+
 ## 🚧 Agent Limitations
 
 Craft Code has the following limitations:
 - The maximum file size that can be read is 20KB.
 - The agent cannot perform complex operations, such as refactoring or debugging.
+
+
+## 🎨 UI Features
+
+Craft Code includes a terminal user interface (TUI) with:
+- **Chat interface** with syntax-highlighted markdown responses
+- **Status bar** showing model, provider, and workspace info
+- **Log panel** for debugging (toggle with `Ctrl+L`)
+- **Keyboard shortcuts**:
+  - `Ctrl+C` - Quit
+  - `Ctrl+L` - Toggle logs
+  - `Ctrl+R` - Clear chat
+- **Slash commands**:
+  - `/help` - Show available commands
+  - `/clear` - Clear chat history
+  - `/logs` - Toggle log panel
+  - `/exit` or `/quit` - Exit Craft Code
+
 
 ## 🛠️ Supported Tools
 
@@ -107,12 +117,16 @@ The agent can perform the following operations:
 | Tool             | Description                       |
 | ---------------- | --------------------------------- |
 | `list_directory` | List files in a directory         |
+| `list_directory_recursive` | Recursively list all files in a directory tree, with optional glob pattern filtering (e.g., '*.py', '*.{js,ts}'). Automatically excludes common directories like .git, node_modules, __pycache__, .venv, build, dist. |
 | `read_file`      | Read file content (up to 20 KB)   |
 | `search_in_file` | Search for text or regex patterns |
 | `write_file`     | Write or overwrite a file safely  |
+| `append_to_file` | Append content to the end of an existing file without overwriting. Creates the file if it doesn't exist. |
+| `replace_in_file` | Find and replace text in a file using regex pattern. Returns the number of replacements made. |
 
 
 ## 💻 Dev workflow
+
 If you want to run Craft Code in development mode:
 ```bash
 git clone git@github.com:abenki/craft-code.git
