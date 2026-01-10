@@ -1,386 +1,722 @@
 import os
 import re
+import subprocess
 import fnmatch
-from typing import List, Dict
-from craft_code.utils import safe_path
+from pathlib import Path
+from typing import Dict, List, Tuple
+from craft_code.utils import safe_path, BASE_DIR
 
-# Tool definitions
+# ============================================================================
+# Tool Definitions (OpenAI Function Calling Format)
+# ============================================================================
+
 tools = [
+    # ========== Core Tools ==========
     {
         "type": "function",
         "function": {
-            "name": "list_directory",
-            "description": "List files in a directory.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to directory"},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_directory_recursive",
-            "description": "Recursively list all files in a directory tree, with optional glob pattern filtering (e.g., '*.py', '*.{js,ts}'). Automatically excludes common directories like .git, node_modules, __pycache__, .venv, build, dist.",
+            "name": "read",
+            "description": "Read file contents. Text files limited to 20KB. Returns first 2000 lines by default, with lines truncated at 2000 chars. Use offset/limit for large files.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Root directory path to start listing from",
+                        "description": "Path to file (relative to workspace)",
                     },
-                    "pattern": {
-                        "type": "string",
-                        "description": "Optional glob pattern to filter files (e.g., '*.py', '*.md'). Defaults to '*' (all files).",
-                    },
-                    "exclude_dirs": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of directory names to exclude. Defaults to common directories like .git, node_modules, etc.",
-                    },
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": "Read the contents of a text file (max 20KB).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the file"},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_in_file",
-            "description": "Search for a keyword or regex pattern in a file and return matching lines.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the file"},
-                    "pattern": {
-                        "type": "string",
-                        "description": "Regex or keyword to search for",
-                    },
-                },
-                "required": ["path", "pattern"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_file",
-            "description": "Write or overwrite content to a file.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the file"},
-                    "content": {
-                        "type": "string",
-                        "description": "Text content to write",
-                    },
-                },
-                "required": ["path", "content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "append_to_file",
-            "description": "Append content to the end of an existing file without overwriting. Creates the file if it doesn't exist.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the file"},
-                    "content": {
-                        "type": "string",
-                        "description": "Text content to append",
-                    },
-                },
-                "required": ["path", "content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "replace_in_file",
-            "description": "Find and replace text in a file using regex pattern. Returns the number of replacements made.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the file"},
-                    "pattern": {
-                        "type": "string",
-                        "description": "Regex pattern to find",
-                    },
-                    "replacement": {
-                        "type": "string",
-                        "description": "Text to replace matches with",
-                    },
-                    "count": {
+                    "offset": {
                         "type": "integer",
-                        "description": "Maximum number of replacements (0 = replace all). Defaults to 0.",
+                        "description": "Line number to start from (0-indexed, optional)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Number of lines to read (optional, default: 2000)",
                     },
                 },
-                "required": ["path", "pattern", "replacement"],
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write",
+            "description": "Write or overwrite file contents. Creates parent directories automatically.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to file (relative to workspace)",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Content to write to the file",
+                    },
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit",
+            "description": "Replace exact text in file. Must match exactly including whitespace. Fails if text not found or appears multiple times. For precise edits, read the file first to get exact text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to file (relative to workspace)",
+                    },
+                    "old_text": {
+                        "type": "string",
+                        "description": "Exact text to find (must match exactly)",
+                    },
+                    "new_text": {
+                        "type": "string",
+                        "description": "Text to replace with",
+                    },
+                },
+                "required": ["path", "old_text", "new_text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bash",
+            "description": "Execute shell command in workspace directory. Use for git operations, running tests, building, installing packages, etc. Commands run with 120s timeout (max 600s). Potentially dangerous commands require user approval.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Shell command to execute",
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Timeout in seconds (optional, default: 120, max: 600)",
+                    },
+                },
+                "required": ["command"],
+            },
+        },
+    },
+    # ========== Read-Only Tools ==========
+    {
+        "type": "function",
+        "function": {
+            "name": "grep",
+            "description": "Search for text or regex pattern in files. Returns matching lines with line numbers. Searches recursively from specified path. Respects .gitignore.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Text or regex pattern to search for",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "File or directory to search (optional, default: '.')",
+                    },
+                    "case_sensitive": {
+                        "type": "boolean",
+                        "description": "Case sensitive search (optional, default: false)",
+                    },
+                },
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "find",
+            "description": "Find files matching glob pattern. Respects .gitignore. Examples: '*.py', 'src/**/*.js', '**/*.md'",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Glob pattern to match files",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Directory to search (optional, default: '.')",
+                    },
+                },
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ls",
+            "description": "List directory contents including files and subdirectories. Shows hidden files by default.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory path (optional, default: '.')",
+                    },
+                },
+                "required": [],
             },
         },
     },
 ]
 
 
-def list_directory(path: str) -> List:
-    """List files in the given directory.
+# ============================================================================
+# Security: Dangerous Command Detection
+# ============================================================================
+
+DANGEROUS_PATTERNS = [
+    (r'rm\s+-rf\s+/', "Recursive force delete of root paths"),
+    (r'sudo\s+', "Requires elevated privileges"),
+    (r'curl\s+.*\|\s*(sh|bash)', "Executes remote script directly"),
+    (r'wget\s+.*\|\s*(sh|bash)', "Executes remote script directly"),
+    (r'dd\s+if=', "Direct disk operation"),
+    (r'mkfs', "Filesystem creation"),
+    (r':\(\)\{.*:\|:.*\};:', "Fork bomb pattern"),
+    (r'chmod\s+777', "Overly permissive file permissions"),
+    (r'>\s*/dev/sd[a-z]', "Writing directly to disk device"),
+]
+
+
+def is_dangerous_command(command: str) -> Tuple[bool, str]:
+    """Check if command matches dangerous patterns.
 
     Args:
-        path: Path to the directory.
+        command: Shell command to check
 
     Returns:
-        List of files in the directory.
+        Tuple of (is_dangerous, reason)
+    """
+    # Check predefined patterns
+    for pattern, reason in DANGEROUS_PATTERNS:
+        if re.search(pattern, command, re.IGNORECASE):
+            return True, reason
+
+    # Check for absolute paths outside workspace
+    # Match paths like /etc/passwd, /tmp/file, etc.
+    abs_path_pattern = r'(?:^|\s)(/[^\s]+)'
+    matches = re.findall(abs_path_pattern, command)
+
+    for path in matches:
+        # Skip common safe paths
+        if path.startswith(('/bin/', '/usr/bin/', '/usr/local/bin/')):
+            continue
+
+        # Check if path is outside workspace
+        real_path = os.path.realpath(path) if os.path.exists(path) else path
+        if not real_path.startswith(BASE_DIR):
+            return True, f"References path outside workspace: {path}"
+
+    return False, ""
+
+
+# ============================================================================
+# Tool Implementations
+# ============================================================================
+
+
+def read(path: str, offset: int = 0, limit: int = 2000) -> Dict:
+    """Read file contents with pagination support.
+
+    Args:
+        path: Path to file
+        offset: Line number to start from (0-indexed)
+        limit: Number of lines to read
+
+    Returns:
+        Dict with content or error
     """
     try:
-        safe_dir = safe_path(path)
-        return os.listdir(safe_dir)
+        safe_file = safe_path(path)
+
+        if not os.path.isfile(safe_file):
+            return {"error": f"{path} is not a file"}
+
+        # Check file size limit (20KB)
+        max_size = 20 * 1024
+        size = os.path.getsize(safe_file)
+        if size > max_size:
+            return {
+                "error": f"File too large ({size} bytes, max {max_size} bytes). Use offset/limit parameters to read in chunks."
+            }
+
+        # Read file
+        with open(safe_file, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+
+        total_lines = len(lines)
+
+        # Apply offset and limit
+        end = min(offset + limit, total_lines)
+        selected_lines = lines[offset:end]
+
+        # Truncate long lines at 2000 chars
+        truncated_lines = []
+        for line in selected_lines:
+            if len(line) > 2000:
+                truncated_lines.append(line[:2000] + "... [truncated]\n")
+            else:
+                truncated_lines.append(line)
+
+        content = "".join(truncated_lines)
+
+        return {
+            "content": content,
+            "total_lines": total_lines,
+            "lines_read": len(selected_lines),
+            "offset": offset,
+        }
+
     except Exception as e:
         return {"error": str(e)}
 
 
-def list_directory_recursive(
-    path: str, pattern: str = "*", exclude_dirs: List[str] = None
-) -> Dict:
-    """Recursively list all files in a directory tree with optional filtering.
+def write(path: str, content: str) -> Dict:
+    """Write or overwrite file contents.
 
     Args:
-        path: Root directory path to start listing from.
-        pattern: Optional glob pattern to filter files (e.g., '*.py', '*.md').
-        exclude_dirs: List of directory names to exclude.
+        path: Path to file
+        content: Content to write
 
     Returns:
-        Dictionary with list of matching file paths relative to the root.
+        Dict with success status or error
     """
-    if exclude_dirs is None:
-        exclude_dirs = [
+    try:
+        safe_file = safe_path(path)
+
+        # Create parent directories
+        os.makedirs(os.path.dirname(safe_file) or ".", exist_ok=True)
+
+        # Write file
+        with open(safe_file, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        return {
+            "success": True,
+            "message": f"Wrote {len(content)} bytes to {path}",
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def edit(path: str, old_text: str, new_text: str) -> Dict:
+    """Replace exact text in file.
+
+    Args:
+        path: Path to file
+        old_text: Exact text to find
+        new_text: Text to replace with
+
+    Returns:
+        Dict with success status or error
+    """
+    try:
+        safe_file = safe_path(path)
+
+        if not os.path.isfile(safe_file):
+            return {"error": f"{path} is not a file"}
+
+        # Read file
+        with open(safe_file, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+
+        # Count occurrences
+        count = content.count(old_text)
+
+        if count == 0:
+            return {"error": f"Text not found in {path}"}
+
+        if count > 1:
+            return {
+                "error": f"Text appears {count} times in {path}. Edit must match exactly once. Use read to find unique text."
+            }
+
+        # Replace (exactly once)
+        new_content = content.replace(old_text, new_text, 1)
+
+        # Write back
+        with open(safe_file, "w", encoding="utf-8") as f:
+            f.write(new_content)
+
+        return {
+            "success": True,
+            "message": f"Replaced text in {path}",
+            "replacements": 1,
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def bash(command: str, timeout: int = 120) -> Dict:
+    """Execute shell command with safety checks.
+
+    Args:
+        command: Shell command to execute
+        timeout: Timeout in seconds (max 600)
+
+    Returns:
+        Dict with stdout/stderr or error/warning
+    """
+    try:
+        # Cap timeout at 10 minutes
+        timeout = min(timeout, 600)
+
+        # Execute command
+        result = subprocess.run(
+            command,
+            shell=True,
+            cwd=BASE_DIR,  # Run in workspace directory
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,  # No interactive input
+        )
+
+        # Truncate output at 100KB
+        max_output = 100 * 1024
+        stdout = result.stdout[:max_output] if result.stdout else ""
+        stderr = result.stderr[:max_output] if result.stderr else ""
+
+        if len(result.stdout or "") > max_output:
+            stdout += "\n... [output truncated at 100KB]"
+        if len(result.stderr or "") > max_output:
+            stderr += "\n... [output truncated at 100KB]"
+
+        return {
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": result.returncode,
+            "command": command,
+        }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "error": f"Command timed out after {timeout}s",
+            "command": command,
+            "exit_code": -1,
+        }
+    except Exception as e:
+        return {"error": str(e), "command": command}
+
+
+def grep(pattern: str, path: str = ".", case_sensitive: bool = False) -> Dict:
+    """Search for pattern in files.
+
+    Args:
+        pattern: Text or regex pattern to search
+        path: File or directory to search
+        case_sensitive: Case sensitive search
+
+    Returns:
+        Dict with matches or error
+    """
+    try:
+        safe_search_path = safe_path(path)
+
+        # Compile regex
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            regex = re.compile(pattern, flags)
+        except re.error as e:
+            return {"error": f"Invalid regex pattern: {e}"}
+
+        matches = []
+
+        # Gitignore patterns to skip
+        ignore_dirs = {
             ".git",
             "node_modules",
             "__pycache__",
             ".venv",
+            "venv",
             "build",
             "dist",
             ".pytest_cache",
             ".mypy_cache",
-            "venv",
-            "env",
-        ]
+        }
 
+        # Search in file
+        if os.path.isfile(safe_search_path):
+            with open(safe_search_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line_num, line in enumerate(f, start=1):
+                    if regex.search(line):
+                        matches.append(
+                            {
+                                "file": path,
+                                "line": line_num,
+                                "text": line.rstrip()[:500],  # Truncate long lines
+                            }
+                        )
+
+        # Search in directory
+        elif os.path.isdir(safe_search_path):
+            for root, dirs, files in os.walk(safe_search_path):
+                # Filter out ignored directories
+                dirs[:] = [d for d in dirs if d not in ignore_dirs]
+
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(file_path, BASE_DIR)
+
+                    # Skip binary files (simple heuristic)
+                    if file.endswith(
+                        (".pyc", ".so", ".o", ".a", ".exe", ".dll", ".bin")
+                    ):
+                        continue
+
+                    try:
+                        with open(
+                            file_path, "r", encoding="utf-8", errors="ignore"
+                        ) as f:
+                            for line_num, line in enumerate(f, start=1):
+                                if regex.search(line):
+                                    matches.append(
+                                        {
+                                            "file": rel_path,
+                                            "line": line_num,
+                                            "text": line.rstrip()[:500],
+                                        }
+                                    )
+                    except Exception:
+                        # Skip files that can't be read
+                        continue
+
+        else:
+            return {"error": f"{path} is not a file or directory"}
+
+        return {
+            "matches": matches[:1000],  # Limit to first 1000 matches
+            "count": len(matches),
+            "truncated": len(matches) > 1000,
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def find(pattern: str, path: str = ".") -> Dict:
+    """Find files matching glob pattern.
+
+    Args:
+        pattern: Glob pattern (e.g., '*.py', '**/*.js')
+        path: Directory to search
+
+    Returns:
+        Dict with file list or error
+    """
     try:
-        safe_dir = safe_path(path)
+        safe_search_path = safe_path(path)
+
+        if not os.path.isdir(safe_search_path):
+            return {"error": f"{path} is not a directory"}
+
+        # Gitignore patterns to skip
+        ignore_dirs = {
+            ".git",
+            "node_modules",
+            "__pycache__",
+            ".venv",
+            "venv",
+            "build",
+            "dist",
+            ".pytest_cache",
+            ".mypy_cache",
+        }
+
         matched_files = []
 
-        for root, dirs, files in os.walk(safe_dir):
-            # Filter out excluded directories in-place
-            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        # Walk directory tree
+        for root, dirs, files in os.walk(safe_search_path):
+            # Filter out ignored directories
+            dirs[:] = [d for d in dirs if d not in ignore_dirs]
 
-            # Match files against pattern
+            # Match files
             for file in files:
                 if fnmatch.fnmatch(file, pattern):
-                    # Get relative path from the starting directory
-                    full_path = os.path.join(root, file)
-                    rel_path = os.path.relpath(full_path, safe_dir)
+                    file_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(file_path, BASE_DIR)
                     matched_files.append(rel_path)
 
         return {
             "files": sorted(matched_files),
             "count": len(matched_files),
-            "pattern": pattern,
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def ls(path: str = ".") -> Dict:
+    """List directory contents.
+
+    Args:
+        path: Directory path
+
+    Returns:
+        Dict with files and directories or error
+    """
+    try:
+        safe_dir = safe_path(path)
+
+        if not os.path.isdir(safe_dir):
+            return {"error": f"{path} is not a directory"}
+
+        entries = os.listdir(safe_dir)
+
+        files = []
+        directories = []
+
+        for entry in sorted(entries):
+            entry_path = os.path.join(safe_dir, entry)
+            if os.path.isdir(entry_path):
+                directories.append(entry)
+            else:
+                files.append(entry)
+
+        return {
+            "files": files,
+            "directories": directories,
+            "total": len(entries),
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================================
+# Approved Tool Execution (after user approval)
+# ============================================================================
+
+
+def execute_bash_approved(command: str, timeout: int = 120) -> Dict:
+    """Execute bash command after user approval.
+
+    Args:
+        command: Shell command to execute
+        timeout: Timeout in seconds (max 600)
+
+    Returns:
+        Dict with stdout/stderr or error
+    """
+    try:
+        # Cap timeout at 10 minutes
+        timeout = min(timeout, 600)
+
+        # Execute command
+        result = subprocess.run(
+            command,
+            shell=True,
+            cwd=BASE_DIR,  # Run in workspace directory
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,  # No interactive input
+        )
+
+        # Truncate output at 100KB
+        max_output = 100 * 1024
+        stdout = result.stdout[:max_output] if result.stdout else ""
+        stderr = result.stderr[:max_output] if result.stderr else ""
+
+        if len(result.stdout or "") > max_output:
+            stdout += "\n... [output truncated at 100KB]"
+        if len(result.stderr or "") > max_output:
+            stderr += "\n... [output truncated at 100KB]"
+
+        return {
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": result.returncode,
+            "command": command,
+        }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "error": f"Command timed out after {timeout}s",
+            "command": command,
+            "exit_code": -1,
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": str(e), "command": command}
 
 
-def read_file(path: str) -> Dict:
-    """Read the contents of a text file safely (max 20KB).
+def execute_write_approved(path: str, content: str) -> Dict:
+    """Execute write operation after user approval.
 
     Args:
-        path: Path to the file.
+        path: Path to file
+        content: Content to write
 
     Returns:
-        Contents of the file.
+        Dict with success status or error
     """
     try:
         safe_file = safe_path(path)
-        if not os.path.isfile(safe_file):
-            return {"error": f"{path} is not a file."}
 
-        # Limit file size to prevent overload
-        max_size = 20 * 1024  # 20 KB
-        size = os.path.getsize(safe_file)
-        if size > max_size:
-            return {"error": f"File too large ({size} bytes). Max allowed: {max_size}."}
+        # Create parent directories
+        os.makedirs(os.path.dirname(safe_file) or ".", exist_ok=True)
 
-        with open(safe_file, "r", encoding="utf-8", errors="ignore") as f:
-            return {"content": f.read()}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def search_in_file(path: str, pattern: str) -> Dict:
-    """Search for a regex or keyword inside a file and return matching lines.
-
-    Args:
-        path: Path to the file.
-        pattern: Regex pattern or keyword to search for.
-
-    Returns:
-        Matches found with line numbers.
-    """
-    try:
-        safe_file = safe_path(path)
-        if not os.path.isfile(safe_file):
-            return {"error": f"{path} is not a file."}
-
-        results = []
-        regex = re.compile(pattern, re.IGNORECASE)
-        with open(safe_file, "r", encoding="utf-8", errors="ignore") as f:
-            for i, line in enumerate(f, start=1):
-                if regex.search(line):
-                    results.append({"line": i, "text": line.strip()})
-        return {"matches": results, "count": len(results)}
-    except re.error:
-        return {"error": f"Invalid regex pattern: {pattern}"}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def write_file(path: str, content: str) -> Dict:
-    """Write or overwrite a file with new content.
-
-    Args:
-        path: Path to the file.
-        content: Text content to write.
-
-    Returns:
-        Success message or error details.
-    """
-    try:
-        safe_file = safe_path(path)
-        os.makedirs(os.path.dirname(safe_file), exist_ok=True)
+        # Write file
         with open(safe_file, "w", encoding="utf-8") as f:
             f.write(content)
-        return {"success": True, "message": f"Wrote {len(content)} bytes to {path}"}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def append_to_file(path: str, content: str) -> Dict:
-    """Append content to the end of a file without overwriting.
-
-    Args:
-        path: Path to the file.
-        content: Text content to append.
-
-    Returns:
-        Success message or error details.
-    """
-    try:
-        safe_file = safe_path(path)
-        os.makedirs(os.path.dirname(safe_file), exist_ok=True)
-
-        # Create file if it doesn't exist
-        mode = "a" if os.path.exists(safe_file) else "w"
-
-        with open(safe_file, mode, encoding="utf-8") as f:
-            f.write(content)
 
         return {
             "success": True,
-            "message": f"Appended {len(content)} bytes to {path}",
+            "message": f"Wrote {len(content)} bytes to {path}",
+            "path": path,
         }
+
     except Exception as e:
         return {"error": str(e)}
 
 
-def replace_in_file(path: str, pattern: str, replacement: str, count: int = 0) -> Dict:
-    """Find and replace text in a file using regex pattern.
-
-    Args:
-        path: Path to the file.
-        pattern: Regex pattern to find.
-        replacement: Text to replace matches with.
-        count: Maximum number of replacements (0 = replace all).
-
-    Returns:
-        Success message with replacement count or error details.
-    """
-    try:
-        safe_file = safe_path(path)
-        if not os.path.isfile(safe_file):
-            return {"error": f"{path} is not a file."}
-
-        # Read file content
-        with open(safe_file, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
-
-        # Perform replacement
-        regex = re.compile(pattern)
-        new_content, num_replacements = regex.subn(replacement, content, count=count)
-
-        # Write back if changes were made
-        if num_replacements > 0:
-            with open(safe_file, "w", encoding="utf-8") as f:
-                f.write(new_content)
-
-        return {
-            "success": True,
-            "replacements": num_replacements,
-            "message": f"Made {num_replacements} replacement(s) in {path}",
-        }
-    except re.error:
-        return {"error": f"Invalid regex pattern: {pattern}"}
-    except Exception as e:
-        return {"error": str(e)}
+# ============================================================================
+# Tool Dispatcher
+# ============================================================================
 
 
 def execute_tool(tool_name: str, args: Dict) -> Dict:
-    """Route tool calls to the correct Python function with sandbox enforcement.
+    """Route tool calls to the correct Python function.
 
     Args:
-        tool_name: Name of the tool to execute.
-        args: Arguments for the tool.
+        tool_name: Name of the tool to execute
+        args: Arguments for the tool
 
     Returns:
-        Result of the tool execution.
+        Result of the tool execution
     """
     try:
-        if tool_name == "list_directory":
-            return list_directory(**args)
-        elif tool_name == "list_directory_recursive":
-            return list_directory_recursive(**args)
-        elif tool_name == "read_file":
-            return read_file(**args)
-        elif tool_name == "search_in_file":
-            return search_in_file(**args)
-        elif tool_name == "write_file":
-            return write_file(**args)
-        elif tool_name == "append_to_file":
-            return append_to_file(**args)
-        elif tool_name == "replace_in_file":
-            return replace_in_file(**args)
+        if tool_name == "read":
+            return read(**args)
+        elif tool_name == "write":
+            return write(**args)
+        elif tool_name == "edit":
+            return edit(**args)
+        elif tool_name == "bash":
+            return bash(**args)
+        elif tool_name == "grep":
+            return grep(**args)
+        elif tool_name == "find":
+            return find(**args)
+        elif tool_name == "ls":
+            return ls(**args)
         else:
             return {"error": f"Unknown tool '{tool_name}'"}
     except ValueError as e:
-        # Catch sandbox violations
+        # Catch sandbox violations from safe_path()
         return {"error": str(e)}
+    except TypeError as e:
+        # Catch missing/invalid arguments
+        return {"error": f"Invalid arguments: {e}"}

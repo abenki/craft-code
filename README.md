@@ -118,16 +118,28 @@ Craft Code includes a terminal user interface (TUI) with:
 
 ## 🛠️ Supported Tools
 
-The agent can perform the following operations:
-| Tool             | Description                       |
-| ---------------- | --------------------------------- |
-| `list_directory` | List files in a directory         |
-| `list_directory_recursive` | Recursively list all files in a directory tree, with optional glob pattern filtering (e.g., '*.py', '*.{js,ts}'). Automatically excludes common directories like .git, node_modules, __pycache__, .venv, build, dist. |
-| `read_file`      | Read file content (up to 20 KB)   |
-| `search_in_file` | Search for text or regex patterns |
-| `write_file`     | Write or overwrite a file safely  |
-| `append_to_file` | Append content to the end of an existing file without overwriting. Creates the file if it doesn't exist. |
-| `replace_in_file` | Find and replace text in a file using regex pattern. Returns the number of replacements made. |
+Craft Code uses a minimal, powerful toolset inspired by Unix philosophy:
+
+### Core Tools (Modify Codebase)
+| Tool    | Description                                                                  |
+| ------- | ---------------------------------------------------------------------------- |
+| `read`  | Read file contents with pagination (offset/limit for large files, max 20KB) |
+| `write` | Write or overwrite files (creates parent directories automatically)          |
+| `edit`  | Replace exact text in files (must match exactly, fails if ambiguous)         |
+| `bash`  | Execute shell commands (git, tests, builds, package management, etc.)        |
+
+### Read-Only Tools (Explore Codebase)
+| Tool   | Description                                                |
+| ------ | ---------------------------------------------------------- |
+| `grep` | Search for text/regex patterns in files (recursive)        |
+| `find` | Find files by glob pattern (e.g., `*.py`, `**/*.js`)       |
+| `ls`   | List directory contents including files and subdirectories |
+
+**Key Features:**
+- All operations are sandboxed to workspace directory
+- `bash` tool enables git operations, testing, building, and package management
+- Dangerous commands (sudo, rm -rf /, etc.) require user approval
+- File paths are relative to workspace root
 
 
 ## 💻 Dev workflow
