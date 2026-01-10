@@ -2,8 +2,7 @@ import os
 import re
 import subprocess
 import fnmatch
-from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 from craft_code.utils import safe_path, BASE_DIR
 
 # ============================================================================
