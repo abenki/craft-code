@@ -1,16 +1,16 @@
 # Craft Code
 
-A local LLM-powered assistant that can explore, analyze, and modify your codebase through structured tool calls.
+A local terminal coding agent that can explore, analyze, and modify your codebase through structured tool calls.
 Chat with your codebase — locally and privately.
 
 ![Craft Code screenshot](/docs/assets/craft-code-screenshot.png "Craft Code Screenshot")
 
 ## 🚀 Installation
-Craft Code runs locally with your own LLM setup. But if you prefer, you can use an OpenAI API key or any API key from a provider supporting OpenAI-style endpoints.
+Craft Code runs locally with your own LLM setup. But if you prefer, you can use an API key from providers like OpenAI or Mistral AI, or any provider supporting OpenAI-style endpoints.
 
 Prerequisites:
 - [uv](https://docs.astral.sh/uv/#highlights)
-- [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.com/) or an OpenAI API key
+- [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.com/), or an API key from OpenAI/Mistral AI
 
 ### 1. Clone the repository and install Craft Code
 ```bash
@@ -50,6 +50,11 @@ api_key = "ollama"
 base_url = "https://api.openai.com/v1"
 model = "gpt-5"
 api_key = ""
+
+[models.mistral]
+base_url = "https://api.mistral.ai/v1"
+model = "devstral-small-latest"
+api_key = ""
 ```
 
 ### 3. Updating or deleting the app
@@ -60,9 +65,9 @@ If you wish to delete Craft Code, simply run `uv tool uninstall craft-code` and 
 ## 🧑‍💻 Usage
 
 ### Launch the app you want to use for LLM serving
-For LM Studio, launch the app, load the model you want to use and start the server.
-
-For Ollama, run `ollama serve` from your terminal.
+- **LM Studio**: Launch the app, load the model you want to use and start the server.
+- **Ollama**: Run `ollama serve` from your terminal.
+- **OpenAI/Mistral AI**: No local setup needed, just configure your API key using `craft-code configure`.
 
 ### Start Craft Code
 To start an interactive session:

@@ -1,4 +1,5 @@
 import os
+import copy
 import tomllib
 import tomli_w
 from pathlib import Path
@@ -19,6 +20,11 @@ DEFAULT_CONFIG = {
         "openai": {
             "base_url": "https://api.openai.com/v1",
             "model": "gpt-5",
+            "api_key": "",
+        },
+        "mistral": {
+            "base_url": "https://api.mistral.ai/v1",
+            "model": "mistral-small-latest",
             "api_key": "",
         },
     },
@@ -48,9 +54,17 @@ def load_config():
         print(f"Failed to load config file: {e}. Using defaults.")
         return DEFAULT_CONFIG
 
-    # Merge user config with defaults (fill missing parts)
-    merged = DEFAULT_CONFIG.copy()
-    merged.update(data)
+    # Deep merge user config with defaults (fill missing parts)
+    merged = copy.deepcopy(DEFAULT_CONFIG)
+
+    # Merge models from user config into defaults
+    if "models" in data:
+        merged["models"].update(data["models"])
+
+    # Update provider selection
+    if "provider" in data:
+        merged["provider"] = data["provider"]
+
     return merged
 
 

@@ -22,6 +22,7 @@ def version_callback(value: bool):
 
 @app.callback()
 def main_callback(
+    ctx: typer.Context,
     version: bool = typer.Option(
         None,
         "--version",
@@ -32,10 +33,12 @@ def main_callback(
     ),
 ):
     """Craft Code CLI entry point."""
-    from craft_code.ui.app import CraftCodeApp
+    # Only launch UI if no subcommand was invoked
+    if ctx.invoked_subcommand is None:
+        from craft_code.ui.app import CraftCodeApp
 
-    app_instance = CraftCodeApp(workspace=".")
-    app_instance.run()
+        app_instance = CraftCodeApp(workspace=".")
+        app_instance.run()
 
 
 @app.command("configure")
@@ -45,7 +48,7 @@ def configure():
 
     current = load_config()
     provider = typer.prompt(
-        "Select provider [lm_studio / ollama / openai]", default="lm_studio"
+        "Select provider [lm_studio / ollama / openai / mistral]", default="lm_studio"
     )
 
     if provider not in current["models"]:
@@ -60,6 +63,10 @@ def configure():
     if provider == "openai":
         api_key = typer.prompt(
             "OpenAI API key (starts with sk-...)", default=api_key, hide_input=True
+        )
+    elif provider == "mistral":
+        api_key = typer.prompt(
+            "Mistral API key", default=api_key, hide_input=True
         )
     elif provider in {"lm_studio", "ollama"}:
         typer.echo("Local mode detected — API key not required.")

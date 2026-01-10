@@ -57,7 +57,7 @@ wheels = [
 [[package]]
 name = "craft-code"
 version = "0.1.2"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "openai" },
     { name = "textual" },

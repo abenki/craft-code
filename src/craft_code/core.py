@@ -44,8 +44,15 @@ def run_agent(
             messages.append(message)
 
             for tool_call in message.tool_calls:
-                tool_name = tool_call.function.name
-                args = json.loads(tool_call.function.arguments)
+                # Handle both object-style (OpenAI) and dict-style (Mistral) tool calls
+                if isinstance(tool_call, dict):
+                    tool_name = tool_call["function"]["name"]
+                    args = json.loads(tool_call["function"]["arguments"])
+                    tool_call_id = tool_call["id"]
+                else:
+                    tool_name = tool_call.function.name
+                    args = json.loads(tool_call.function.arguments)
+                    tool_call_id = tool_call.id
 
                 if verbose:
                     debug_log(f"EXECUTING TOOL: {tool_name}", args)
@@ -68,7 +75,7 @@ def run_agent(
                 messages.append(
                     {
                         "role": "tool",
-                        "tool_call_id": tool_call.id,
+                        "tool_call_id": tool_call_id,
                         "content": json.dumps(tool_output),
                     }
                 )
