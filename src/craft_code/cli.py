@@ -1,6 +1,6 @@
 import typer
 import tomllib
-from craft_code.config.loader import load_config, save_config
+from craft_code.config.loader import load_config, save_config, ModelConfig
 
 app = typer.Typer(
     name="craft-code",
@@ -48,18 +48,18 @@ def configure():
 
     current = load_config()
     provider = typer.prompt(
-        "Select provider [lm_studio / ollama / openai / mistral]", default="lm_studio"
+        "Select provider [lm_studio / ollama / openai / mistral]", default=current.provider
     )
 
-    if provider not in current["models"]:
+    if provider not in current.models:
         typer.echo(f"❌ Unknown provider: {provider}")
         raise typer.Exit(code=1)
 
-    model_cfg = current["models"][provider]
-    base_url = typer.prompt("Base URL", default=model_cfg["base_url"])
-    model = typer.prompt("Model name", default=model_cfg["model"])
+    model_cfg = current.models[provider]
+    base_url = typer.prompt("Base URL", default=model_cfg.base_url)
+    model = typer.prompt("Model name", default=model_cfg.model)
 
-    api_key = model_cfg.get("api_key", "")
+    api_key = model_cfg.api_key or ""
     if provider == "openai":
         api_key = typer.prompt(
             "OpenAI API key (starts with sk-...)", default=api_key, hide_input=True
@@ -72,10 +72,13 @@ def configure():
         typer.echo("Local mode detected — API key not required.")
         api_key = api_key or provider
 
-    current["provider"] = provider
-    current["models"][provider]["base_url"] = base_url
-    current["models"][provider]["model"] = model
-    current["models"][provider]["api_key"] = api_key
+    # Update the config (Pydantic model)
+    current.provider = provider
+    current.models[provider] = ModelConfig(
+        base_url=base_url,
+        model=model,
+        api_key=api_key
+    )
 
     save_config(current)
     typer.echo("✅ Configuration updated successfully!")

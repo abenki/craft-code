@@ -2,8 +2,39 @@ import os
 import re
 import subprocess
 import fnmatch
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 from craft_code.utils import safe_path, BASE_DIR
+import pathspec
+
+# ============================================================================
+# Constants
+# ============================================================================
+
+# File reading limits
+MAX_FILE_SIZE = 20 * 1024  # 20KB
+MAX_LINE_LENGTH = 2000  # characters
+DEFAULT_LINE_LIMIT = 2000  # lines
+
+# Bash execution limits
+MAX_OUTPUT_SIZE = 100 * 1024  # 100KB
+DEFAULT_TIMEOUT = 120  # seconds
+MAX_TIMEOUT = 600  # seconds (10 minutes)
+
+# Search limits
+MAX_GREP_MATCHES = 1000
+
+# Default directories to ignore (fallback when .gitignore doesn't exist)
+DEFAULT_IGNORE_DIRS = {
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+    ".pytest_cache",
+    ".mypy_cache",
+}
 
 # ============================================================================
 # Tool Definitions (OpenAI Function Calling Format)
@@ -108,7 +139,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "grep",
-            "description": "Search for text or regex pattern in files. Returns matching lines with line numbers. Searches recursively from specified path. Respects .gitignore.",
+            "description": "Search for text or regex pattern in files. Returns matching lines with line numbers. Searches recursively from specified path. Respects .gitignore if present, otherwise uses common ignore patterns (.git, node_modules, __pycache__, etc.).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -133,7 +164,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "find",
-            "description": "Find files matching glob pattern. Respects .gitignore. Examples: '*.py', 'src/**/*.js', '**/*.md'",
+            "description": "Find files matching glob pattern. Respects .gitignore if present, otherwise uses common ignore patterns (.git, node_modules, __pycache__, etc.). Examples: '*.py', 'src/**/*.js', '**/*.md'",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -168,6 +199,53 @@ tools = [
         },
     },
 ]
+
+
+# ============================================================================
+# Gitignore Support
+# ============================================================================
+
+
+def get_gitignore_spec() -> Optional[pathspec.PathSpec]:
+    """Load and parse .gitignore file if it exists.
+
+    Returns:
+        PathSpec object for matching paths, or None if no .gitignore exists
+    """
+    gitignore_path = os.path.join(BASE_DIR, ".gitignore")
+
+    if not os.path.exists(gitignore_path):
+        return None
+
+    try:
+        with open(gitignore_path, "r", encoding="utf-8") as f:
+            patterns = f.read().splitlines()
+        return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
+    except Exception:
+        # If .gitignore can't be read, return None (fail gracefully)
+        return None
+
+
+def should_ignore_path(path: str, gitignore_spec: Optional[pathspec.PathSpec]) -> bool:
+    """Check if a path should be ignored based on .gitignore or defaults.
+
+    Args:
+        path: Relative path to check
+        gitignore_spec: PathSpec from .gitignore, or None
+
+    Returns:
+        True if path should be ignored
+    """
+    # Get relative path from BASE_DIR
+    rel_path = os.path.relpath(path, BASE_DIR)
+
+    # Check .gitignore if available
+    if gitignore_spec and gitignore_spec.match_file(rel_path):
+        return True
+
+    # Fallback: check if any path component is in DEFAULT_IGNORE_DIRS
+    path_parts = rel_path.split(os.sep)
+    return bool(DEFAULT_IGNORE_DIRS & set(path_parts))
 
 
 # ============================================================================
@@ -224,7 +302,7 @@ def is_dangerous_command(command: str) -> Tuple[bool, str]:
 # ============================================================================
 
 
-def read(path: str, offset: int = 0, limit: int = 2000) -> Dict:
+def read(path: str, offset: int = 0, limit: int = DEFAULT_LINE_LIMIT) -> Dict:
     """Read file contents with pagination support.
 
     Args:
@@ -241,12 +319,11 @@ def read(path: str, offset: int = 0, limit: int = 2000) -> Dict:
         if not os.path.isfile(safe_file):
             return {"error": f"{path} is not a file"}
 
-        # Check file size limit (20KB)
-        max_size = 20 * 1024
+        # Check file size limit
         size = os.path.getsize(safe_file)
-        if size > max_size:
+        if size > MAX_FILE_SIZE:
             return {
-                "error": f"File too large ({size} bytes, max {max_size} bytes). Use offset/limit parameters to read in chunks."
+                "error": f"File too large ({size} bytes, max {MAX_FILE_SIZE} bytes). Use offset/limit parameters to read in chunks."
             }
 
         # Read file
@@ -259,11 +336,11 @@ def read(path: str, offset: int = 0, limit: int = 2000) -> Dict:
         end = min(offset + limit, total_lines)
         selected_lines = lines[offset:end]
 
-        # Truncate long lines at 2000 chars
+        # Truncate long lines
         truncated_lines = []
         for line in selected_lines:
-            if len(line) > 2000:
-                truncated_lines.append(line[:2000] + "... [truncated]\n")
+            if len(line) > MAX_LINE_LENGTH:
+                truncated_lines.append(line[:MAX_LINE_LENGTH] + "... [truncated]\n")
             else:
                 truncated_lines.append(line)
 
@@ -358,7 +435,7 @@ def edit(path: str, old_text: str, new_text: str) -> Dict:
         return {"error": str(e)}
 
 
-def bash(command: str, timeout: int = 120) -> Dict:
+def bash(command: str, timeout: int = DEFAULT_TIMEOUT) -> Dict:
     """Execute shell command with safety checks.
 
     Args:
@@ -369,8 +446,8 @@ def bash(command: str, timeout: int = 120) -> Dict:
         Dict with stdout/stderr or error/warning
     """
     try:
-        # Cap timeout at 10 minutes
-        timeout = min(timeout, 600)
+        # Cap timeout at maximum
+        timeout = min(timeout, MAX_TIMEOUT)
 
         # Execute command
         result = subprocess.run(
@@ -383,14 +460,13 @@ def bash(command: str, timeout: int = 120) -> Dict:
             stdin=subprocess.DEVNULL,  # No interactive input
         )
 
-        # Truncate output at 100KB
-        max_output = 100 * 1024
-        stdout = result.stdout[:max_output] if result.stdout else ""
-        stderr = result.stderr[:max_output] if result.stderr else ""
+        # Truncate output if needed
+        stdout = result.stdout[:MAX_OUTPUT_SIZE] if result.stdout else ""
+        stderr = result.stderr[:MAX_OUTPUT_SIZE] if result.stderr else ""
 
-        if len(result.stdout or "") > max_output:
+        if len(result.stdout or "") > MAX_OUTPUT_SIZE:
             stdout += "\n... [output truncated at 100KB]"
-        if len(result.stderr or "") > max_output:
+        if len(result.stderr or "") > MAX_OUTPUT_SIZE:
             stderr += "\n... [output truncated at 100KB]"
 
         return {
@@ -433,18 +509,8 @@ def grep(pattern: str, path: str = ".", case_sensitive: bool = False) -> Dict:
 
         matches = []
 
-        # Gitignore patterns to skip
-        ignore_dirs = {
-            ".git",
-            "node_modules",
-            "__pycache__",
-            ".venv",
-            "venv",
-            "build",
-            "dist",
-            ".pytest_cache",
-            ".mypy_cache",
-        }
+        # Load .gitignore patterns
+        gitignore_spec = get_gitignore_spec()
 
         # Search in file
         if os.path.isfile(safe_search_path):
@@ -463,11 +529,19 @@ def grep(pattern: str, path: str = ".", case_sensitive: bool = False) -> Dict:
         elif os.path.isdir(safe_search_path):
             for root, dirs, files in os.walk(safe_search_path):
                 # Filter out ignored directories
-                dirs[:] = [d for d in dirs if d not in ignore_dirs]
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if not should_ignore_path(os.path.join(root, d), gitignore_spec)
+                ]
 
                 for file in files:
                     file_path = os.path.join(root, file)
                     rel_path = os.path.relpath(file_path, BASE_DIR)
+
+                    # Skip ignored files
+                    if should_ignore_path(file_path, gitignore_spec):
+                        continue
 
                     # Skip binary files (simple heuristic)
                     if file.endswith(
@@ -496,9 +570,9 @@ def grep(pattern: str, path: str = ".", case_sensitive: bool = False) -> Dict:
             return {"error": f"{path} is not a file or directory"}
 
         return {
-            "matches": matches[:1000],  # Limit to first 1000 matches
+            "matches": matches[:MAX_GREP_MATCHES],
             "count": len(matches),
-            "truncated": len(matches) > 1000,
+            "truncated": len(matches) > MAX_GREP_MATCHES,
         }
 
     except Exception as e:
@@ -521,30 +595,29 @@ def find(pattern: str, path: str = ".") -> Dict:
         if not os.path.isdir(safe_search_path):
             return {"error": f"{path} is not a directory"}
 
-        # Gitignore patterns to skip
-        ignore_dirs = {
-            ".git",
-            "node_modules",
-            "__pycache__",
-            ".venv",
-            "venv",
-            "build",
-            "dist",
-            ".pytest_cache",
-            ".mypy_cache",
-        }
-
         matched_files = []
+
+        # Load .gitignore patterns
+        gitignore_spec = get_gitignore_spec()
 
         # Walk directory tree
         for root, dirs, files in os.walk(safe_search_path):
             # Filter out ignored directories
-            dirs[:] = [d for d in dirs if d not in ignore_dirs]
+            dirs[:] = [
+                d
+                for d in dirs
+                if not should_ignore_path(os.path.join(root, d), gitignore_spec)
+            ]
 
             # Match files
             for file in files:
                 if fnmatch.fnmatch(file, pattern):
                     file_path = os.path.join(root, file)
+
+                    # Skip ignored files
+                    if should_ignore_path(file_path, gitignore_spec):
+                        continue
+
                     rel_path = os.path.relpath(file_path, BASE_DIR)
                     matched_files.append(rel_path)
 
@@ -588,93 +661,6 @@ def ls(path: str = ".") -> Dict:
             "files": files,
             "directories": directories,
             "total": len(entries),
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# ============================================================================
-# Approved Tool Execution (after user approval)
-# ============================================================================
-
-
-def execute_bash_approved(command: str, timeout: int = 120) -> Dict:
-    """Execute bash command after user approval.
-
-    Args:
-        command: Shell command to execute
-        timeout: Timeout in seconds (max 600)
-
-    Returns:
-        Dict with stdout/stderr or error
-    """
-    try:
-        # Cap timeout at 10 minutes
-        timeout = min(timeout, 600)
-
-        # Execute command
-        result = subprocess.run(
-            command,
-            shell=True,
-            cwd=BASE_DIR,  # Run in workspace directory
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            stdin=subprocess.DEVNULL,  # No interactive input
-        )
-
-        # Truncate output at 100KB
-        max_output = 100 * 1024
-        stdout = result.stdout[:max_output] if result.stdout else ""
-        stderr = result.stderr[:max_output] if result.stderr else ""
-
-        if len(result.stdout or "") > max_output:
-            stdout += "\n... [output truncated at 100KB]"
-        if len(result.stderr or "") > max_output:
-            stderr += "\n... [output truncated at 100KB]"
-
-        return {
-            "stdout": stdout,
-            "stderr": stderr,
-            "exit_code": result.returncode,
-            "command": command,
-        }
-
-    except subprocess.TimeoutExpired:
-        return {
-            "error": f"Command timed out after {timeout}s",
-            "command": command,
-            "exit_code": -1,
-        }
-    except Exception as e:
-        return {"error": str(e), "command": command}
-
-
-def execute_write_approved(path: str, content: str) -> Dict:
-    """Execute write operation after user approval.
-
-    Args:
-        path: Path to file
-        content: Content to write
-
-    Returns:
-        Dict with success status or error
-    """
-    try:
-        safe_file = safe_path(path)
-
-        # Create parent directories
-        os.makedirs(os.path.dirname(safe_file) or ".", exist_ok=True)
-
-        # Write file
-        with open(safe_file, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        return {
-            "success": True,
-            "message": f"Wrote {len(content)} bytes to {path}",
-            "path": path,
         }
 
     except Exception as e:
